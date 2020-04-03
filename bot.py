@@ -4,44 +4,53 @@ import re
 from time import sleep
 from bs4 import BeautifulSoup
 
-bot = telebot.TeleBot('')
+emoji_sing = u'\U00002757'
+emoji_ru_flag = u'\U0001F1F7\U0001F1FA'
+short_link = 'https://yandex.ru/maps/covid19'
+statistic_link = 'https://yandex.ru/maps/covid19?ll=41.775580%2C54.894027&z=3'
+statistic = []
+buff = []
+cities = []
 
 def send_message(message):
-    bot.send_message(chat_id='', text=message)
+    bot = telebot.TeleBot(get_info('token.txt'))
+    bot.send_message(chat_id=get_info('chat_id.txt'), text=message, parse_mode= "Markdown")
 
-def get_link():
-    news_link = 'https://www.rospotrebnadzor.ru/about/info/news/'
-    page = requests.get(news_link)
-    soup = BeautifulSoup(page.text, 'html.parser')
+def check_statistics():
+    message = ''
+    page = requests.get(statistic_link)
     if page.status_code == 200:
-        covid = soup.find('a', href_='/about/info/news/news_details.php')
-        for a in soup.find_all('a', href=True):
-            if re.search(r'О подтвержденных случаях новой коронавирусной инфекции COVID-2019 в России', str(a)):
-                rpn_link = 'https://www.rospotrebnadzor.ru' + a['href']
-                print(rpn_link)
-                if data_changed(rpn_link):
-                    write_message(rpn_link)
-                    get_data(rpn_link)
-                break
+        soup = BeautifulSoup(page.text, 'html.parser')
+        date = emoji_sing + soup.find('div', class_='covid-panel-view__subtitle').text + emoji_ru_flag + '\n'
+        for i in soup.find('div', class_='covid-panel-view__stat-items _even'):
+            buff.append(i.text.replace(' ', '').replace('\xa0', ''))
 
-def get_data(rpn_link):
-    page = requests.get(rpn_link)
-    soup = BeautifulSoup(page.text, 'html.parser')
-    if page.status_code == 200:
-        date = soup.find('p', class_='date').text
-        emoji = u'\U00002757'
-        emoji_flag = u'\U0001F1F7\U0001F1FA'
-        date = emoji + date + emoji_flag
-        divs1 = soup.findAll(string=re.compile(r'подтвержден.*?[\d]+ '))
-        divs_moscow = soup.findAll(string=re.compile(r'[\d]+\. Москва ([\d]+)'))
-        divs_rf = soup.findAll(string=re.compile(r'Российской Федерации.+зарегистриров.+ [\d]+ случ.+'))
-        moscow = re.search(r'[\d]+\. Москва ([\d]+)', divs_moscow[0])
-        moscow_message = 'В том числе {} случаев в Москве'.format(moscow.group(1))
-        total = re.search(r'([\d]+)', str(divs_rf[0].split('.')[0]))
-        total_message = 'Общее число случаев в РФ: {}'.format(total.group(1))
-        more_message = "Подробнее: {}".format(rpn_link)
-        message = date + "\n" + divs1[-1] + "\n" + moscow_message + "\n" + total_message + "\n" + more_message
-        send_message(message)
+        statistic.append('{}{}Статистика COVID19 в РФ по информации на {}:\n\n'.format(emoji_sing,
+                                                             emoji_ru_flag,
+                                                             re.search(r'[\d]{1,2} [\w]+ 2020', date).group(0)))
+        statistic.append('Заражений за всё время: *{}*\n'.format(re.search(r'([\d]+).+завсёвремя', buff[0]).group(1)))
+        statistic.append('Заражений за последние сутки: *{}*\n'.format(re.search(r'\+([\d]+).+за[\d]{1,2}', buff[1]).group(1)))
+        statistic.append('Выздоровлений за всё время: *{}*\n'.format(re.search(r'([\d]+).+здоровлений', buff[2]).group(1)))
+        statistic.append('Смертей за всё время: *{}*\n'.format(re.search(r'([\d]+).+мертей', buff[3]).group(1)))
+
+        for i in statistic:
+            message += i
+        message += '\nПодтверждённые случаи заражений по регионам:\n'
+
+        for i in soup.find('div', class_='covid-panel-view__items'):
+            city = re.findall(r'([\D\W]+)([\d ]+)\+?(\+?[\d]+)?', i.text.replace('\xa0', ''))
+            if city[0][1] != ' ':
+                 if city[0][2] != '':
+                     cities.append(('{}: {} (+{})'.format(city[0][0], city[0][1], city[0][2])))
+                 else:
+                     cities.append('{}: {}'.format(city[0][0], city[0][1]))
+        for i in cities:
+            message += i + '\n'
+        message += 'Подробнее: {}'.format(short_link)
+        if data_changed(message):
+            print(message)
+            send_message(message)
+            write_message(message)
 
 def data_changed(message):
     file = open('message.txt', 'r')
@@ -57,9 +66,15 @@ def write_message(message):
     file.write(message)
     file.close()
 
+def get_info(data):
+    file = open(data, 'r')
+    info = file.read()
+    file.close()
+    return info
+
 if __name__ == "__main__":
     while True:
-        get_link()
-        for i in range(30):
+        check_statistics()
+        for i in range(60):
             sleep(60)
             print(i, sep=' ')
